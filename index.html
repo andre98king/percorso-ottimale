@@ -10,6 +10,7 @@
   <meta name="theme-color" content="#1d4ed8">
   <title>Percorso Giornaliero</title>
   <link rel="manifest" href="manifest.json">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -434,10 +435,35 @@
     </div>
 
     <div class="card" style="margin-top:12px;">
+      <div class="card-title">Importa Rubrica da XLS</div>
+      <p class="setting-info">
+        Importa i clienti direttamente dal file XLS del gestionale.<br>
+        I dati restano <strong>solo sul tuo dispositivo</strong>, non vengono mai caricati online.
+      </p>
+      <div id="import-status" class="status-bar hidden"></div>
+      <label class="btn btn-outline" style="width:100%;cursor:pointer;margin-bottom:10px;">
+        📂 Scegli file XLS / XLSX
+        <input type="file" id="xls-input" accept=".xls,.xlsx,.csv" style="display:none" onchange="importaXLS(this)">
+      </label>
+      <p class="setting-info" style="margin-top:6px;">
+        ⚠️ L'importazione <strong>sostituisce</strong> la rubrica esistente.<br>
+        Clienti aggiunti manualmente verranno rimossi.
+      </p>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <div class="card-title">Dati &amp; Privacy</div>
+      <p class="setting-info">
+        Tutti i dati (clienti, indirizzi) sono salvati <strong>solo su questo dispositivo</strong> nel browser locale. Nessun dato viene trasmesso a server esterni, eccetto le richieste di geocodifica anonime a OpenStreetMap.
+      </p>
+      <button class="btn btn-danger btn-sm" style="margin-top:10px;" onclick="cancellaRubrica()">🗑️ Cancella tutta la rubrica</button>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
       <div class="card-title">Info app</div>
       <p class="setting-info">
         <strong>Percorso Giornaliero</strong><br>
-        Versione 1.0 — Ottimizzazione percorsi interventi.<br><br>
+        Versione 1.1 — Ottimizzazione percorsi interventi.<br><br>
         Geocodifica: OpenStreetMap Nominatim<br>
         Algoritmo: TSP ottimale (brute force)<br>
         Navigazione: Google Maps
@@ -498,26 +524,10 @@ let editingId = null;
 let selectedIds = new Set();
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener('DOMContentLoaded', () => {
   loadDB();
   renderDate();
   renderOffice();
-
-  // Prima esecuzione: carica clienti da JSON
-  if (db.clients.length === 0) {
-    const statusEl = document.getElementById('status-oggi');
-    showStatus(statusEl, '', '⏳ Caricamento rubrica clienti...');
-    try {
-      const res = await fetch('./clienti_data.json');
-      const data = await res.json();
-      db.clients = data;
-      saveDB();
-      statusEl.className = 'status-bar hidden';
-    } catch(e) {
-      showStatus(statusEl, 'error', '⚠️ Impossibile caricare la rubrica. Controlla la connessione.');
-    }
-  }
-
   renderClientSelect();
   renderClientManage();
 
@@ -943,6 +953,104 @@ async function saveOffice() {
   btn.disabled = false;
   btn.textContent = 'Salva indirizzo ufficio';
   alert('✅ Ufficio salvato!');
+}
+
+// ─── IMPORTA XLS ─────────────────────────────────────────────────────────────
+function importaXLS(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById('import-status');
+  showStatus(statusEl, '', '⏳ Lettura file in corso...');
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+      if (rows.length < 2) {
+        showStatus(statusEl, 'error', '❌ File vuoto o non valido.');
+        return;
+      }
+
+      // Rileva intestazioni automaticamente
+      const headers = rows[0].map(h => String(h).toLowerCase().trim());
+      const col = (names) => {
+        for (const n of names) {
+          const i = headers.findIndex(h => h.includes(n));
+          if (i !== -1) return i;
+        }
+        return -1;
+      };
+
+      // Mappa colonne del gestionale (flessibile)
+      const iName    = col(['ragsoc', 'ragione', 'nome', 'name', 'cliente']);
+      const iVia     = col(['indirizzo', 'via', 'address']);
+      const iCap     = col(['cap', 'postal', 'zip']);
+      const iCitta   = col(['localita', 'città', 'citta', 'city', 'comune']);
+      const iProv    = col(['prov']);
+      const iTel     = col(['tel_cfo', 'tel', 'telefono', 'phone']);
+      const iCel     = col(['cel_cfo', 'cel', 'cellulare', 'mobile']);
+
+      if (iName === -1 || iVia === -1) {
+        showStatus(statusEl, 'error', '❌ Colonne non riconosciute. Il file deve avere almeno "ragsoc_cfo" e "indirizzo_cfo".');
+        return;
+      }
+
+      const clienti = [];
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        const name = String(row[iName] || '').trim();
+        if (!name) continue;
+
+        const via   = String(row[iVia]  || '').trim();
+        const cap   = String(row[iCap]  || '').replace('.0','').trim();
+        const citta = String(row[iCitta]|| '').trim();
+        const prov  = iProv !== -1 ? String(row[iProv] || '').trim() : '';
+        const tel   = iTel !== -1 ? String(row[iTel] || '').trim() : '';
+        const cel   = iCel !== -1 ? String(row[iCel] || '').trim() : '';
+
+        const addrParts = [via, cap, citta].filter(Boolean);
+        const address = addrParts.join(', ') + (prov ? ` (${prov})` : '');
+        const phone = tel || cel;
+
+        clienti.push({ id: r, name, address, phone, notes: '', lat: null, lng: null });
+      }
+
+      if (clienti.length === 0) {
+        showStatus(statusEl, 'error', '❌ Nessun cliente trovato nel file.');
+        return;
+      }
+
+      if (!confirm(`Importare ${clienti.length} clienti? La rubrica attuale verrà sostituita.`)) {
+        showStatus(statusEl, 'hidden', '');
+        input.value = '';
+        return;
+      }
+
+      db.clients = clienti;
+      saveDB();
+      selectedIds.clear();
+      renderClientSelect();
+      renderClientManage();
+      showStatus(statusEl, 'success', `✅ Importati ${clienti.length} clienti. Dati salvati solo su questo dispositivo.`);
+      input.value = '';
+    } catch(err) {
+      showStatus(statusEl, 'error', '❌ Errore nella lettura del file: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function cancellaRubrica() {
+  if (!confirm(`Eliminare tutti i ${db.clients.length} clienti dalla rubrica?`)) return;
+  db.clients = [];
+  selectedIds.clear();
+  saveDB();
+  renderClientSelect();
+  renderClientManage();
+  alert('✅ Rubrica cancellata.');
 }
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
