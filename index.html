@@ -330,6 +330,22 @@
     }
     .total-dist strong { color: var(--blue); font-size: 1rem; }
 
+    /* PROGRESS BAR */
+    .progress-wrap { background: var(--border); border-radius: 99px; height: 10px; margin: 10px 0; overflow: hidden; }
+    .progress-bar { height: 100%; background: var(--blue); border-radius: 99px; transition: width 0.3s; }
+    .progress-text { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 6px; display: flex; justify-content: space-between; }
+
+    /* VERIFICA RESULTS */
+    .verifica-summary { display: flex; gap: 10px; margin: 10px 0; }
+    .verifica-box { flex: 1; border-radius: 10px; padding: 10px; text-align: center; }
+    .verifica-box .num { font-size: 1.5rem; font-weight: 800; }
+    .verifica-box .lbl { font-size: 0.72rem; margin-top: 2px; }
+    .verifica-box.ok { background: var(--green-light); color: var(--green); }
+    .verifica-box.ko { background: var(--red-light); color: var(--red); }
+
+    /* CLIENT WARNING */
+    .client-warn { color: var(--red); font-size: 0.75rem; margin-top: 2px; font-weight: 600; }
+
     /* SEARCH */
     .search-wrap { position: relative; margin-bottom: 10px; }
     .search-wrap svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; }
@@ -415,6 +431,10 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
         <input class="search-box" id="search-clienti" type="search" placeholder="Cerca per nome o città..." oninput="renderClientManage()">
       </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <button class="btn btn-outline btn-sm" id="filter-all-btn" onclick="setFiltroClienti('all',this)" style="flex:1;border-color:var(--blue);color:var(--blue)">Tutti</button>
+        <button class="btn btn-outline btn-sm" id="filter-ko-btn" onclick="setFiltroClienti('ko',this)" style="flex:1">⚠️ Problematici</button>
+      </div>
       <div class="search-count" id="search-count-clienti"></div>
       <div id="client-manage-list"></div>
     </div>
@@ -452,9 +472,33 @@
     </div>
 
     <div class="card" style="margin-top:12px;">
+      <div class="card-title">Verifica Rubrica</div>
+      <p class="setting-info">Controlla quanti indirizzi sono localizzabili su mappa. I clienti non trovati verranno evidenziati nella rubrica per essere corretti.</p>
+      <div id="verifica-status" class="status-bar hidden"></div>
+      <div id="verifica-progress" style="display:none">
+        <div class="progress-text">
+          <span id="verifica-progress-text">Verifica in corso...</span>
+          <span id="verifica-progress-pct">0%</span>
+        </div>
+        <div class="progress-wrap"><div class="progress-bar" id="verifica-bar" style="width:0%"></div></div>
+      </div>
+      <div id="verifica-results" style="display:none">
+        <div class="verifica-summary">
+          <div class="verifica-box ok"><div class="num" id="v-ok">0</div><div class="lbl">Trovati</div></div>
+          <div class="verifica-box ko"><div class="num" id="v-ko">0</div><div class="lbl">Non trovati</div></div>
+        </div>
+        <button class="btn btn-outline btn-sm" id="btn-mostra-problemi" onclick="mostraClientiProblematici()" style="display:none;width:100%;margin-top:6px;">Vai ai clienti problematici →</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn btn-primary" id="btn-avvia-verifica" onclick="avviaVerifica()" style="flex:1">🔍 Avvia verifica</button>
+        <button class="btn btn-outline" id="btn-stop-verifica" onclick="stopVerifica()" style="display:none;flex:1">⏹ Ferma</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
       <div class="card-title">Dati &amp; Privacy</div>
       <p class="setting-info">
-        Tutti i dati (clienti, indirizzi) sono salvati <strong>solo su questo dispositivo</strong> nel browser locale. Nessun dato viene trasmesso a server esterni, eccetto le richieste di geocodifica anonime a OpenStreetMap.
+        Tutti i dati (clienti, indirizzi) sono salvati <strong>solo su questo dispositivo</strong> nel browser locale. La geocodifica degli indirizzi avviene tramite Google Maps API (solo l'indirizzo viene inviato a Google, nessun altro dato).
       </p>
       <button class="btn btn-danger btn-sm" style="margin-top:10px;" onclick="cancellaRubrica()">🗑️ Cancella tutta la rubrica</button>
     </div>
@@ -464,7 +508,7 @@
       <p class="setting-info">
         <strong>Percorso Giornaliero</strong><br>
         Versione 1.1 — Ottimizzazione percorsi interventi.<br><br>
-        Geocodifica: OpenStreetMap Nominatim<br>
+        Geocodifica: Google Maps API<br>
         Algoritmo: TSP ottimale (brute force)<br>
         Navigazione: Google Maps
       </p>
@@ -522,6 +566,9 @@ let db = {
 };
 let editingId = null;
 let selectedIds = new Set();
+let verificaRunning = false;
+let verificaStop = false;
+let filtroClienti = 'all'; // 'all' | 'ko'
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -566,47 +613,27 @@ function showScreen(name, btn) {
   if (name === 'clienti') renderClientManage();
 }
 
-// ─── GEOCODIFICA ──────────────────────────────────────────────────────────────
-async function nominatimFetch(q) {
-  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&countrycodes=it`;
-  const res = await fetch(url, { headers: { 'Accept-Language': 'it' } });
-  const data = await res.json();
-  return data.length ? { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) } : null;
-}
+// ─── GEOCODIFICA (Google Maps API) ───────────────────────────────────────────
+const GMAPS_KEY = 'AIzaSyBBMJ_nWyqJOdFlSfkkZTg_7rSum4CEnWs';
 
 async function geocode(address) {
-  // Pulisce l'indirizzo: rimuove provincia tra parentesi, normalizza spazi
+  // Pulizia indirizzo: rimuove (CE), (NA) ecc.
   const clean = address
-    .replace(/\s*\([A-Z]{2}\)\s*/g, ' ')  // rimuove (CE), (NA), ecc.
+    .replace(/\s*\([A-Z]{2}\)\s*/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
-  // Tentativo 1: indirizzo completo pulito
-  let result = await nominatimFetch(clean + ', Italia');
-  if (result) return result;
-  await delay(1100);
+  const query = clean.includes('Italia') ? clean : clean + ', Italia';
+  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&region=it&language=it&key=${GMAPS_KEY}`;
 
-  // Tentativo 2: estrae via + città (senza CAP)
-  // Formato tipico: "VIA ROMA, 1, 80100, NAPOLI"
-  const parts = clean.split(',').map(p => p.trim()).filter(Boolean);
-  if (parts.length >= 3) {
-    // Prende prima parte (via) e ultima (città), scarta CAP numerico
-    const via = parts[0];
-    const citta = parts.find((p, i) => i > 0 && !/^\d{4,5}$/.test(p)) || parts[parts.length - 1];
-    if (via && citta && via !== citta) {
-      result = await nominatimFetch(`${via}, ${citta}, Italia`);
-      if (result) return result;
-      await delay(1100);
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.status === 'OK' && data.results.length > 0) {
+      const loc = data.results[0].geometry.location;
+      return { lat: loc.lat, lng: loc.lng };
     }
-  }
-
-  // Tentativo 3: solo città
-  const cittaParts = parts.filter(p => !/^\d{4,5}$/.test(p));
-  if (cittaParts.length >= 2) {
-    result = await nominatimFetch(cittaParts[cittaParts.length - 1] + ', Italia');
-    if (result) return result;
-  }
-
+  } catch(e) {}
   return null;
 }
 
@@ -762,7 +789,7 @@ async function ottimizza() {
         btn.textContent = 'Calcola percorso ottimale';
         return;
       }
-      if (i < missing.length - 1) await delay(1200);
+      if (i < missing.length - 1) await delay(50);
     }
     saveDB();
   }
@@ -823,6 +850,19 @@ function buildMapsUrl(office, order) {
 }
 
 // ─── SCREEN CLIENTI ──────────────────────────────────────────────────────────
+function setFiltroClienti(tipo, btn) {
+  filtroClienti = tipo;
+  document.getElementById('filter-all-btn').style.fontWeight = tipo === 'all' ? '700' : '';
+  document.getElementById('filter-ko-btn').style.fontWeight = tipo === 'ko' ? '700' : '';
+  renderClientManage();
+}
+
+function mostraClientiProblematici() {
+  filtroClienti = 'ko';
+  const navBtn = document.querySelectorAll('nav button')[1];
+  showScreen('clienti', navBtn);
+}
+
 function renderClientManage() {
   const list = document.getElementById('client-manage-list');
   const countEl = document.getElementById('search-count-clienti');
@@ -834,37 +874,45 @@ function renderClientManage() {
     return;
   }
 
-  const filtered = q
-    ? db.clients.filter(c =>
-        c.name.toLowerCase().includes(q) ||
-        c.address.toLowerCase().includes(q))
-    : db.clients;
+  let pool = db.clients;
+  if (filtroClienti === 'ko') pool = pool.filter(c => c.geocoded === false);
 
+  const filtered = q
+    ? pool.filter(c => c.name.toLowerCase().includes(q) || c.address.toLowerCase().includes(q))
+    : pool;
+
+  const koCount = db.clients.filter(c => c.geocoded === false).length;
+  const filterLabel = filtroClienti === 'ko' ? ` (⚠️ problematici)` : '';
   countEl.textContent = q
-    ? `${filtered.length} risultati su ${db.clients.length}`
-    : `${db.clients.length} clienti totali`;
+    ? `${filtered.length} risultati${filterLabel}`
+    : `${filtered.length} clienti${filterLabel}` + (koCount > 0 && filtroClienti === 'all' ? ` — ⚠️ ${koCount} problematici` : '');
 
   const toShow = filtered.slice(0, 80);
   const hidden = filtered.length - toShow.length;
 
   if (!filtered.length) {
-    list.innerHTML = `<div class="empty"><div class="icon">🔍</div><p>Nessun risultato per "<strong>${esc(q)}</strong>"</p></div>`;
+    const msg = filtroClienti === 'ko'
+      ? '<div class="empty"><div class="icon">✅</div><p>Nessun indirizzo problematico!<br>Tutti i clienti verificati sono stati trovati.</p></div>'
+      : `<div class="empty"><div class="icon">🔍</div><p>Nessun risultato per "<strong>${esc(q)}</strong>"</p></div>`;
+    list.innerHTML = msg;
     return;
   }
 
   list.innerHTML = toShow.map(c => `
-    <div class="client-manage-item">
+    <div class="client-manage-item" style="${c.geocoded === false ? 'border-color:#fca5a5;background:#fff5f5' : ''}">
       <div class="info">
         <div class="name">${esc(c.name)}</div>
         <div class="addr">${esc(c.address)}</div>
         ${c.phone ? `<div class="addr">📞 ${esc(c.phone)}</div>` : ''}
+        ${c.geocoded === false ? `<div class="client-warn">⚠️ Indirizzo non trovato su mappa — modifica per correggere</div>` : ''}
+        ${c.geocoded === true ? `<div style="font-size:0.72rem;color:var(--green);margin-top:2px">✓ Localizzato</div>` : ''}
       </div>
       <div class="actions">
         <button class="btn btn-outline btn-sm" onclick="editClient(${c.id})">✏️</button>
         <button class="btn btn-danger btn-sm" onclick="deleteClient(${c.id})">🗑️</button>
       </div>
     </div>
-  `).join('') + (hidden > 0 ? `<p class="search-count" style="text-align:center;padding:8px">...e altri ${hidden}. Usa la ricerca per affinare.</p>` : '');
+  `).join('') + (hidden > 0 ? `<p class="search-count" style="text-align:center;padding:8px">...e altri ${hidden}. Usa la ricerca.</p>` : '');
 }
 
 // ─── MODAL ───────────────────────────────────────────────────────────────────
@@ -1077,6 +1125,90 @@ function importaXLS(input) {
     }
   };
   reader.readAsArrayBuffer(file);
+}
+
+// ─── VERIFICA RUBRICA ─────────────────────────────────────────────────────────
+async function avviaVerifica() {
+  if (db.clients.length === 0) {
+    showStatus(document.getElementById('verifica-status'), 'error', '⚠️ Rubrica vuota. Importa prima i clienti.');
+    return;
+  }
+
+  verificaStop = false;
+  verificaRunning = true;
+
+  document.getElementById('btn-avvia-verifica').style.display = 'none';
+  document.getElementById('btn-stop-verifica').style.display = 'flex';
+  document.getElementById('verifica-progress').style.display = 'block';
+  document.getElementById('verifica-results').style.display = 'none';
+  document.getElementById('verifica-status').className = 'status-bar hidden';
+
+  const total = db.clients.length;
+  let ok = 0, ko = 0;
+
+  for (let i = 0; i < total; i++) {
+    if (verificaStop) break;
+
+    const c = db.clients[i];
+
+    // Se ha già coordinate valide, salta la geocodifica ma segna come ok
+    if (c.lat && c.lng) {
+      c.geocoded = true;
+      ok++;
+    } else {
+      const coords = await geocode(c.address);
+      if (coords) {
+        c.lat = coords.lat;
+        c.lng = coords.lng;
+        c.geocoded = true;
+        ok++;
+      } else {
+        c.geocoded = false;
+        ko++;
+      }
+      if (i < total - 1 && !verificaStop) await delay(50); // Google non ha rate limit aggressivi
+    }
+
+    // Aggiorna UI ogni 5 clienti o all'ultimo
+    if (i % 5 === 0 || i === total - 1) {
+      const pct = Math.round(((i + 1) / total) * 100);
+      document.getElementById('verifica-bar').style.width = pct + '%';
+      document.getElementById('verifica-progress-pct').textContent = pct + '%';
+      document.getElementById('verifica-progress-text').textContent =
+        `Verificato ${i + 1} di ${total} — ✅ ${ok} trovati, ❌ ${ko} non trovati`;
+      saveDB();
+      renderClientManage();
+    }
+  }
+
+  // Fine verifica
+  verificaRunning = false;
+  const stopped = verificaStop;
+
+  document.getElementById('btn-avvia-verifica').style.display = 'flex';
+  document.getElementById('btn-stop-verifica').style.display = 'none';
+  document.getElementById('verifica-progress').style.display = 'none';
+  document.getElementById('verifica-results').style.display = 'block';
+  document.getElementById('v-ok').textContent = ok;
+  document.getElementById('v-ko').textContent = ko;
+
+  const btnProblemi = document.getElementById('btn-mostra-problemi');
+  btnProblemi.style.display = ko > 0 ? 'block' : 'none';
+
+  const msg = stopped
+    ? `⏹ Verifica interrotta. ${ok} trovati, ${ko} non trovati finora.`
+    : ko === 0
+      ? `✅ Tutti i ${ok} clienti verificati sono stati trovati!`
+      : `⚠️ ${ko} indirizzi non trovati su ${total} totali.`;
+  const type = ko > 0 ? 'error' : 'success';
+  showStatus(document.getElementById('verifica-status'), stopped ? '' : type, msg);
+  saveDB();
+}
+
+function stopVerifica() {
+  verificaStop = true;
+  document.getElementById('btn-stop-verifica').disabled = true;
+  document.getElementById('btn-stop-verifica').textContent = 'Interruzione...';
 }
 
 function cancellaRubrica() {
