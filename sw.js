@@ -1,4 +1,4 @@
-const CACHE = 'percorso-v2';
+const CACHE = 'percorso-v3';
 const ASSETS = ['./index.html', './manifest.json'];
 
 self.addEventListener('install', e => {

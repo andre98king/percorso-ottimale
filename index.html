@@ -346,6 +346,16 @@
     /* CLIENT WARNING */
     .client-warn { color: var(--red); font-size: 0.75rem; margin-top: 2px; font-weight: 600; }
 
+    /* URGENTE */
+    .btn-urgent {
+      background: none; border: 2px solid var(--border);
+      border-radius: 8px; padding: 5px 8px; font-size: 1rem;
+      cursor: pointer; flex-shrink: 0; line-height: 1;
+      transition: all 0.15s; opacity: 0.4;
+    }
+    .btn-urgent:active { transform: scale(0.92); }
+    .btn-urgent.on { background: #fef2f2; border-color: var(--red); opacity: 1; }
+
     /* SEARCH */
     .search-wrap { position: relative; margin-bottom: 10px; }
     .search-wrap svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; }
@@ -569,6 +579,7 @@ let selectedIds = new Set();
 let verificaRunning = false;
 let verificaStop = false;
 let filtroClienti = 'all'; // 'all' | 'ko'
+let urgentId = null;       // ID cliente urgente (primo stop fisso)
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -617,11 +628,16 @@ function showScreen(name, btn) {
 const GMAPS_KEY = 'AIzaSyBBMJ_nWyqJOdFlSfkkZTg_7rSum4CEnWs';
 
 async function geocode(address) {
-  // Pulizia indirizzo: rimuove (CE), (NA) ecc.
-  const clean = address
-    .replace(/\s*\([A-Z]{2}\)\s*/g, ' ')
+  // Pulizia indirizzo:
+  //  (NA) → , NA  (formato leggibile da Google)
+  //  CAP 5 cifre → rimosso  (causa confusione con indirizzi italiani)
+  let clean = address
+    .replace(/\s*\(([A-Z]{2})\)\s*/g, ', $1')   // (NA) → , NA
+    .replace(/,?\s*\b\d{5}\b\s*,?/g, ',')        // rimuove CAP italiano
+    .replace(/,\s*,/g, ', ')                      // virgole doppie
     .replace(/\s+/g, ' ')
-    .trim();
+    .trim()
+    .replace(/^,\s*|,\s*$/g, '');                // virgola inizio/fine
 
   const query = clean.includes('Italia') ? clean : clean + ', Italia';
   const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&region=it&language=it&key=${GMAPS_KEY}`;
@@ -633,7 +649,15 @@ async function geocode(address) {
       const loc = data.results[0].geometry.location;
       return { lat: loc.lat, lng: loc.lng };
     }
-  } catch(e) {}
+    if (data.status === 'REQUEST_DENIED') {
+      throw new Error('Chiave API non autorizzata. Controlla le restrizioni su Google Cloud Console.');
+    }
+    if (data.status === 'OVER_QUERY_LIMIT' || data.status === 'OVER_DAILY_LIMIT') {
+      throw new Error('Quota API esaurita. Riprova domani o controlla il piano Google Maps.');
+    }
+  } catch(e) {
+    if (e.message && (e.message.includes('API') || e.message.includes('Quota'))) throw e;
+  }
   return null;
 }
 
@@ -665,24 +689,53 @@ function permute(arr) {
   return result;
 }
 
+function routeDist(origin, perm, office) {
+  // Calcola distanza totale: origin → perm[0] → ... → perm[n] → office (ritorno)
+  let d = haversine(origin.lat, origin.lng, perm[0].lat, perm[0].lng);
+  for (let i = 0; i < perm.length - 1; i++) {
+    d += haversine(perm[i].lat, perm[i].lng, perm[i+1].lat, perm[i+1].lng);
+  }
+  d += haversine(perm[perm.length-1].lat, perm[perm.length-1].lng, office.lat, office.lng);
+  return d;
+}
+
 function optimizeRoute(office, clients) {
   if (clients.length === 0) return { order: [], totalDist: 0 };
   if (clients.length === 1) {
-    const d = haversine(office.lat, office.lng, clients[0].lat, clients[0].lng);
+    const d = haversine(office.lat, office.lng, clients[0].lat, clients[0].lng)
+            + haversine(clients[0].lat, clients[0].lng, office.lat, office.lng);
     return { order: clients, totalDist: d };
   }
 
   const perms = permute(clients);
   let best = null, bestDist = Infinity;
-
   for (const perm of perms) {
-    let d = haversine(office.lat, office.lng, perm[0].lat, perm[0].lng);
-    for (let i = 0; i < perm.length - 1; i++) {
-      d += haversine(perm[i].lat, perm[i].lng, perm[i+1].lat, perm[i+1].lng);
-    }
+    const d = routeDist(office, perm, office);
     if (d < bestDist) { bestDist = d; best = perm; }
   }
   return { order: best, totalDist: bestDist };
+}
+
+function optimizeWithUrgent(office, clients) {
+  const urgent = urgentId ? clients.find(c => c.id === urgentId) : null;
+  if (!urgent) return optimizeRoute(office, clients);
+
+  const rest = clients.filter(c => c.id !== urgentId);
+  if (rest.length === 0) {
+    const d = haversine(office.lat, office.lng, urgent.lat, urgent.lng)
+            + haversine(urgent.lat, urgent.lng, office.lat, office.lng);
+    return { order: [urgent], totalDist: d };
+  }
+
+  // Ufficio → urgente (fisso), poi ottimizza il resto fino al ritorno in ufficio
+  const perms = permute(rest);
+  let bestRest = null, bestDist = Infinity;
+  for (const perm of perms) {
+    const d = routeDist(urgent, perm, office);
+    if (d < bestDist) { bestDist = d; bestRest = perm; }
+  }
+  const legToUrgent = haversine(office.lat, office.lng, urgent.lat, urgent.lng);
+  return { order: [urgent, ...bestRest], totalDist: legToUrgent + bestDist };
 }
 
 // ─── SCREEN OGGI ─────────────────────────────────────────────────────────────
@@ -727,27 +780,42 @@ function renderClientSelect() {
   const toShow = [...selected, ...unselected.slice(0, 50 - selected.length)];
   const hidden = unselected.length - (50 - selected.length);
 
-  list.innerHTML = toShow.map(c => `
-    <div class="client-select-item ${selectedIds.has(c.id) ? 'selected' : ''}"
-         onclick="toggleSelect(${c.id})">
-      <div class="check">${selectedIds.has(c.id) ? '✓' : ''}</div>
+  list.innerHTML = toShow.map(c => {
+    const sel = selectedIds.has(c.id);
+    const isUrgent = urgentId === c.id;
+    return `
+    <div class="client-select-item ${sel ? 'selected' : ''}" onclick="toggleSelect(${c.id})">
+      <div class="check">${sel ? '✓' : ''}</div>
       <div class="info">
-        <div class="name">${esc(c.name)}</div>
+        <div class="name">${esc(c.name)}${isUrgent ? ' <span style="color:var(--red);font-size:0.72rem;font-weight:700">⚡ URGENTE</span>' : ''}</div>
         <div class="addr">${esc(c.address)}</div>
       </div>
-    </div>
-  `).join('') + (hidden > 0 ? `<p class="search-count" style="text-align:center;padding:8px">...e altri ${hidden}. Affina la ricerca.</p>` : '');
+      ${sel ? `<button class="btn-urgent${isUrgent ? ' on' : ''}" onclick="setUrgent(event,${c.id})" title="${isUrgent ? 'Rimuovi urgenza' : 'Segna come urgente'}">⚡</button>` : ''}
+    </div>`;
+  }).join('') + (hidden > 0 ? `<p class="search-count" style="text-align:center;padding:8px">...e altri ${hidden}. Affina la ricerca.</p>` : '');
 }
 
 function clearSelection() {
   selectedIds.clear();
+  urgentId = null;
   document.getElementById('result-card').style.display = 'none';
   renderClientSelect();
 }
 
 function toggleSelect(id) {
-  if (selectedIds.has(id)) selectedIds.delete(id);
-  else selectedIds.add(id);
+  if (selectedIds.has(id)) {
+    selectedIds.delete(id);
+    if (urgentId === id) urgentId = null;
+  } else {
+    selectedIds.add(id);
+  }
+  document.getElementById('result-card').style.display = 'none';
+  renderClientSelect();
+}
+
+function setUrgent(e, id) {
+  e.stopPropagation();
+  urgentId = urgentId === id ? null : id;
   document.getElementById('result-card').style.display = 'none';
   renderClientSelect();
 }
@@ -777,14 +845,21 @@ async function ottimizza() {
     for (let i = 0; i < missing.length; i++) {
       const c = missing[i];
       showStatus(statusEl, '', `🔍 Geolocalizzazione ${i+1}/${missing.length}: ${c.name}...`);
-      const coords = await geocode(c.address);
-      if (coords) {
-        c.lat = coords.lat;
-        c.lng = coords.lng;
-        const idx = db.clients.findIndex(x => x.id === c.id);
-        if (idx !== -1) { db.clients[idx].lat = coords.lat; db.clients[idx].lng = coords.lng; }
-      } else {
-        showStatus(statusEl, 'error', `❌ Indirizzo non trovato: "${c.name}" — ${c.address}. Prova a modificare l'indirizzo nella rubrica.`);
+      try {
+        const coords = await geocode(c.address);
+        if (coords) {
+          c.lat = coords.lat;
+          c.lng = coords.lng;
+          const idx = db.clients.findIndex(x => x.id === c.id);
+          if (idx !== -1) { db.clients[idx].lat = coords.lat; db.clients[idx].lng = coords.lng; }
+        } else {
+          showStatus(statusEl, 'error', `❌ Indirizzo non trovato: "${c.name}" — ${c.address}. Modifica l'indirizzo nella rubrica.`);
+          btn.disabled = false;
+          btn.textContent = 'Calcola percorso ottimale';
+          return;
+        }
+      } catch(apiErr) {
+        showStatus(statusEl, 'error', `❌ ${apiErr.message}`);
         btn.disabled = false;
         btn.textContent = 'Calcola percorso ottimale';
         return;
@@ -794,8 +869,8 @@ async function ottimizza() {
     saveDB();
   }
 
-  // Ottimizza
-  const { order, totalDist } = optimizeRoute(db.office, selected);
+  // Ottimizza (con eventuale cliente urgente)
+  const { order, totalDist } = optimizeWithUrgent(db.office, selected);
 
   // Render result
   const stepsEl = document.getElementById('result-steps');
@@ -813,11 +888,12 @@ async function ottimizza() {
   order.forEach((c, i) => {
     const d = haversine(prevLat, prevLng, c.lat, c.lng);
     prevLat = c.lat; prevLng = c.lng;
+    const isUrgent = c.id === urgentId;
     html += `
       <div class="result-step">
-        <div class="step-num">${i + 1}</div>
+        <div class="step-num" style="${isUrgent ? 'background:var(--red)' : ''}">${i + 1}</div>
         <div class="step-info">
-          <div class="name">${esc(c.name)}</div>
+          <div class="name">${esc(c.name)}${isUrgent ? ' <span style="color:var(--red);font-size:0.75rem;font-weight:700">⚡ URGENTE</span>' : ''}</div>
           <div class="addr">${esc(c.address)}</div>
           <div class="step-dist">↑ ${fmtDist(d)} dal punto precedente</div>
         </div>
@@ -825,9 +901,23 @@ async function ottimizza() {
     `;
   });
 
+  // Ritorno in ufficio
+  const last = order[order.length - 1];
+  const returnDist = haversine(last.lat, last.lng, db.office.lat, db.office.lng);
+  html += `
+    <div class="result-step">
+      <div class="step-num end">🏢</div>
+      <div class="step-info">
+        <div class="name">Rientro ufficio</div>
+        <div class="addr">${esc(db.office.address)}</div>
+        <div class="step-dist">↑ ${fmtDist(returnDist)} dall'ultima tappa</div>
+      </div>
+    </div>
+  `;
+
   stepsEl.innerHTML = html;
   document.getElementById('total-dist').innerHTML =
-    `Distanza totale stimata: <strong>${fmtDist(totalDist)}</strong> (in linea d'aria)`;
+    `Distanza totale stimata: <strong>${fmtDist(totalDist)}</strong> (in linea d'aria, A/R incluso)`;
 
   // Google Maps URL
   const mapsUrl = buildMapsUrl(db.office, order);
@@ -843,10 +933,14 @@ async function ottimizza() {
 }
 
 function buildMapsUrl(office, order) {
-  const encode = s => encodeURIComponent(s);
-  // Formato: google.com/maps/dir/origine/tappa1/tappa2/...
-  const parts = [office.address, ...order.map(c => c.address)];
-  return 'https://www.google.com/maps/dir/' + parts.map(encode).join('/');
+  // Round trip: origine = destinazione = ufficio
+  const point = c => (c.lat && c.lng) ? `${c.lat},${c.lng}` : encodeURIComponent(c.address);
+  const waypointStr = c => (c.lat && c.lng) ? `${c.lat},${c.lng}` : c.address;
+  const origin = point(office);
+  let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${origin}&travelmode=driving`;
+  const waypoints = order.map(waypointStr);
+  if (waypoints.length > 0) url += `&waypoints=${encodeURIComponent(waypoints.join('|'))}`;
+  return url;
 }
 
 // ─── SCREEN CLIENTI ──────────────────────────────────────────────────────────
@@ -968,15 +1062,22 @@ async function saveClient() {
 
   if (!existing || existing.address !== address) {
     showStatus(statusEl, '', '🔍 Verifica indirizzo...');
-    const coords = await geocode(address);
-    if (!coords) {
-      showStatus(statusEl, 'error', '❌ Indirizzo non trovato. Prova a essere più specifico (es. Via Roma 1, Milano).');
+    try {
+      const coords = await geocode(address);
+      if (!coords) {
+        showStatus(statusEl, 'error', '❌ Indirizzo non trovato. Prova a essere più specifico (es. Via Roma 1, Milano).');
+        btn.disabled = false;
+        btn.textContent = 'Salva';
+        return;
+      }
+      lat = coords.lat;
+      lng = coords.lng;
+    } catch(apiErr) {
+      showStatus(statusEl, 'error', `❌ ${apiErr.message}`);
       btn.disabled = false;
       btn.textContent = 'Salva';
       return;
     }
-    lat = coords.lat;
-    lng = coords.lng;
   }
 
   if (editingId) {
@@ -1000,6 +1101,7 @@ function deleteClient(id) {
   if (!confirm('Eliminare questo cliente?')) return;
   db.clients = db.clients.filter(c => c.id !== id);
   selectedIds.delete(id);
+  if (urgentId === id) urgentId = null;
   saveDB();
   renderClientManage();
 }
@@ -1156,17 +1258,28 @@ async function avviaVerifica() {
       c.geocoded = true;
       ok++;
     } else {
-      const coords = await geocode(c.address);
-      if (coords) {
-        c.lat = coords.lat;
-        c.lng = coords.lng;
-        c.geocoded = true;
-        ok++;
-      } else {
-        c.geocoded = false;
-        ko++;
+      try {
+        const coords = await geocode(c.address);
+        if (coords) {
+          c.lat = coords.lat;
+          c.lng = coords.lng;
+          c.geocoded = true;
+          ok++;
+        } else {
+          c.geocoded = false;
+          ko++;
+        }
+      } catch(apiErr) {
+        // Errore bloccante (chiave non autorizzata, quota esaurita)
+        showStatus(document.getElementById('verifica-status'), 'error', `❌ ${apiErr.message}`);
+        verificaRunning = false;
+        document.getElementById('btn-avvia-verifica').style.display = 'flex';
+        document.getElementById('btn-stop-verifica').style.display = 'none';
+        document.getElementById('verifica-progress').style.display = 'none';
+        saveDB();
+        return;
       }
-      if (i < total - 1 && !verificaStop) await delay(50); // Google non ha rate limit aggressivi
+      if (i < total - 1 && !verificaStop) await delay(50);
     }
 
     // Aggiorna UI ogni 5 clienti o all'ultimo
@@ -1215,6 +1328,7 @@ function cancellaRubrica() {
   if (!confirm(`Eliminare tutti i ${db.clients.length} clienti dalla rubrica?`)) return;
   db.clients = [];
   selectedIds.clear();
+  urgentId = null;
   saveDB();
   renderClientSelect();
   renderClientManage();
