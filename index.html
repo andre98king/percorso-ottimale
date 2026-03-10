@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Percorso">
+  <meta name="theme-color" content="#1d4ed8">
+  <title>Percorso Giornaliero</title>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue: #1d4ed8;
+      --blue-light: #dbeafe;
+      --blue-dark: #1e3a8a;
+      --green: #16a34a;
+      --green-light: #dcfce7;
+      --red: #dc2626;
+      --red-light: #fee2e2;
+      --gray: #64748b;
+      --gray-light: #f1f5f9;
+      --border: #e2e8f0;
+      --text: #1a202c;
+      --text-muted: #64748b;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--gray-light);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    /* HEADER */
+    header {
+      background: var(--blue);
+      color: white;
+      padding: 16px 20px 12px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    header h1 { font-size: 1.1rem; font-weight: 700; letter-spacing: 0.3px; }
+    header p { font-size: 0.75rem; opacity: 0.8; margin-top: 2px; }
+
+    /* MAIN CONTENT */
+    main {
+      flex: 1;
+      overflow-y: auto;
+      padding-bottom: 80px;
+    }
+
+    /* SCREENS */
+    .screen { display: none; padding: 16px; }
+    .screen.active { display: block; }
+
+    /* BOTTOM NAV */
+    nav {
+      position: fixed;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100%;
+      max-width: 480px;
+      background: white;
+      border-top: 1px solid var(--border);
+      display: flex;
+      z-index: 100;
+    }
+    nav button {
+      flex: 1;
+      padding: 10px 4px 8px;
+      border: none;
+      background: none;
+      font-size: 0.65rem;
+      color: var(--gray);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      transition: color 0.15s;
+    }
+    nav button .icon { font-size: 1.4rem; line-height: 1; }
+    nav button.active { color: var(--blue); font-weight: 600; }
+
+    /* CARDS */
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+    }
+    .card-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    /* BUTTONS */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 12px 20px;
+      border-radius: 10px;
+      border: none;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      text-decoration: none;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary { background: var(--blue); color: white; width: 100%; }
+    .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; transform: none; }
+    .btn-green { background: var(--green); color: white; width: 100%; }
+    .btn-outline { background: white; color: var(--blue); border: 2px solid var(--blue); }
+    .btn-danger { background: var(--red); color: white; }
+    .btn-sm { padding: 7px 14px; font-size: 0.8rem; border-radius: 8px; }
+
+    /* CLIENTE ITEM (lista selezione) */
+    .client-select-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 2px solid var(--border);
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      background: white;
+    }
+    .client-select-item.selected {
+      border-color: var(--blue);
+      background: var(--blue-light);
+    }
+    .client-select-item .check {
+      width: 22px; height: 22px;
+      border-radius: 6px;
+      border: 2px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      font-size: 0.9rem;
+      transition: all 0.15s;
+    }
+    .client-select-item.selected .check {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: white;
+    }
+    .client-select-item .info { flex: 1; min-width: 0; }
+    .client-select-item .name { font-weight: 600; font-size: 0.95rem; }
+    .client-select-item .addr { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* RESULT */
+    .result-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .result-step:last-child { border-bottom: none; }
+    .step-num {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: var(--blue);
+      color: white;
+      font-size: 0.8rem;
+      font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .step-num.start { background: var(--green); }
+    .step-num.end { background: var(--gray); }
+    .step-info .name { font-weight: 600; font-size: 0.9rem; }
+    .step-info .addr { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+    .step-dist { font-size: 0.72rem; color: var(--text-muted); margin-top: 4px; }
+
+    /* CLIENTE GESTIONE */
+    .client-manage-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      margin-bottom: 8px;
+      background: white;
+    }
+    .client-manage-item .info { flex: 1; min-width: 0; }
+    .client-manage-item .name { font-weight: 600; font-size: 0.9rem; }
+    .client-manage-item .addr { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .client-manage-item .actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+    /* FORM */
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .form-group input, .form-group textarea {
+      width: 100%;
+      padding: 11px 14px;
+      border: 2px solid var(--border);
+      border-radius: 9px;
+      font-size: 0.95rem;
+      background: white;
+      transition: border-color 0.15s;
+      font-family: inherit;
+    }
+    .form-group input:focus, .form-group textarea:focus {
+      outline: none;
+      border-color: var(--blue);
+    }
+
+    /* MODAL */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 200;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: white;
+      border-radius: 20px 20px 0 0;
+      padding: 20px;
+      width: 100%;
+      max-width: 480px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .modal-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .modal-actions { display: flex; gap: 10px; margin-top: 16px; }
+    .modal-actions .btn { flex: 1; }
+
+    /* STATUS */
+    .status-bar {
+      background: #fffbeb;
+      border: 1px solid #fcd34d;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.82rem;
+      color: #92400e;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status-bar.error { background: var(--red-light); border-color: #fca5a5; color: var(--red); }
+    .status-bar.success { background: var(--green-light); border-color: #86efac; color: var(--green); }
+    .status-bar.hidden { display: none; }
+
+    /* BADGE */
+    .badge {
+      display: inline-block;
+      background: var(--blue);
+      color: white;
+      border-radius: 20px;
+      padding: 2px 8px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      margin-left: 6px;
+    }
+
+    /* EMPTY STATE */
+    .empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-muted);
+    }
+    .empty .icon { font-size: 3rem; margin-bottom: 12px; }
+    .empty p { font-size: 0.9rem; }
+
+    /* SETTINGS */
+    .setting-info {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+    .office-display {
+      background: var(--green-light);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      color: var(--green);
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .total-dist {
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 8px;
+    }
+    .total-dist strong { color: var(--blue); font-size: 1rem; }
+
+    /* SEARCH */
+    .search-wrap { position: relative; margin-bottom: 10px; }
+    .search-wrap svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+    .search-box {
+      width: 100%;
+      padding: 10px 14px 10px 36px;
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      font-size: 0.9rem;
+      background: white;
+      font-family: inherit;
+      transition: border-color 0.15s;
+    }
+    .search-box:focus { outline: none; border-color: var(--blue); }
+    .search-count { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px; }
+
+    /* SELECTED SUMMARY */
+    .selected-summary {
+      background: var(--blue-light);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 0.82rem;
+      color: var(--blue);
+      font-weight: 600;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .selected-summary button {
+      background: none; border: none; color: var(--blue);
+      font-size: 0.78rem; cursor: pointer; text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Percorso Giornaliero</h1>
+  <p id="header-date"></p>
+</header>
+
+<main>
+
+  <!-- SCREEN: OGGI -->
+  <div class="screen active" id="screen-oggi">
+    <div id="status-oggi" class="status-bar hidden"></div>
+
+    <div class="card">
+      <div class="card-title">Seleziona i clienti di oggi</div>
+      <div class="search-wrap">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input class="search-box" id="search-oggi" type="search" placeholder="Cerca cliente..." oninput="renderClientSelect()">
+      </div>
+      <div id="selected-summary" class="selected-summary" style="display:none">
+        <span id="selected-count-text"></span>
+        <button onclick="clearSelection()">Deseleziona tutti</button>
+      </div>
+      <div class="search-count" id="search-count-oggi"></div>
+      <div id="client-select-list"></div>
+    </div>
+
+    <button class="btn btn-primary" id="btn-optimize" onclick="ottimizza()">
+      Calcola percorso ottimale
+    </button>
+
+    <div id="result-card" class="card" style="margin-top:12px; display:none;">
+      <div class="card-title">Percorso ottimale</div>
+      <div id="result-steps"></div>
+      <div id="total-dist" class="total-dist"></div>
+      <a id="btn-maps" class="btn btn-green" style="margin-top:14px;" target="_blank">
+        Apri in Google Maps
+      </a>
+    </div>
+  </div>
+
+  <!-- SCREEN: CLIENTI -->
+  <div class="screen" id="screen-clienti">
+    <div id="status-clienti" class="status-bar hidden"></div>
+    <div class="card">
+      <div class="card-title">Rubrica Clienti</div>
+      <div class="search-wrap">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input class="search-box" id="search-clienti" type="search" placeholder="Cerca per nome o città..." oninput="renderClientManage()">
+      </div>
+      <div class="search-count" id="search-count-clienti"></div>
+      <div id="client-manage-list"></div>
+    </div>
+    <button class="btn btn-primary" onclick="openModal()">+ Aggiungi Cliente</button>
+  </div>
+
+  <!-- SCREEN: IMPOSTAZIONI -->
+  <div class="screen" id="screen-impostazioni">
+    <div class="card">
+      <div class="card-title">Ufficio (punto di partenza)</div>
+      <p class="setting-info">Inserisci l'indirizzo del tuo ufficio. Ogni percorso partirà da qui.</p>
+      <div id="office-display"></div>
+      <div class="form-group">
+        <label>Indirizzo ufficio</label>
+        <input type="text" id="office-input" placeholder="es. Via Roma 1, Milano">
+      </div>
+      <button class="btn btn-primary" onclick="saveOffice()">Salva indirizzo ufficio</button>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <div class="card-title">Info app</div>
+      <p class="setting-info">
+        <strong>Percorso Giornaliero</strong><br>
+        Versione 1.0 — Ottimizzazione percorsi interventi.<br><br>
+        Geocodifica: OpenStreetMap Nominatim<br>
+        Algoritmo: TSP ottimale (brute force)<br>
+        Navigazione: Google Maps
+      </p>
+    </div>
+  </div>
+
+</main>
+
+<!-- BOTTOM NAV -->
+<nav>
+  <button class="active" onclick="showScreen('oggi', this)">
+    <span class="icon">🗓️</span>Oggi
+  </button>
+  <button onclick="showScreen('clienti', this)">
+    <span class="icon">👥</span>Clienti
+  </button>
+  <button onclick="showScreen('impostazioni', this)">
+    <span class="icon">⚙️</span>Impostazioni
+  </button>
+</nav>
+
+<!-- MODAL: aggiungi/modifica cliente -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModalOutside(event)">
+  <div class="modal">
+    <div class="modal-title" id="modal-title">Nuovo Cliente</div>
+    <div id="modal-status" class="status-bar hidden"></div>
+    <div class="form-group">
+      <label>Nome / Ragione Sociale</label>
+      <input type="text" id="modal-name" placeholder="es. Rossi Mario">
+    </div>
+    <div class="form-group">
+      <label>Indirizzo completo</label>
+      <input type="text" id="modal-address" placeholder="es. Via Garibaldi 10, Roma">
+    </div>
+    <div class="form-group">
+      <label>Telefono (opzionale)</label>
+      <input type="tel" id="modal-phone" placeholder="es. 333 1234567">
+    </div>
+    <div class="form-group">
+      <label>Note (opzionale)</label>
+      <textarea id="modal-notes" rows="2" placeholder="es. Citofono al 3, orario preferito..."></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal()">Annulla</button>
+      <button class="btn btn-primary" id="modal-save-btn" onclick="saveClient()">Salva</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── STATO ───────────────────────────────────────────────────────────────────
+let db = {
+  office: null,       // { address, lat, lng }
+  clients: []         // [{ id, name, address, phone, notes, lat, lng }]
+};
+let editingId = null;
+let selectedIds = new Set();
+
+// ─── INIT ────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async () => {
+  loadDB();
+  renderDate();
+  renderOffice();
+
+  // Prima esecuzione: carica clienti da JSON
+  if (db.clients.length === 0) {
+    const statusEl = document.getElementById('status-oggi');
+    showStatus(statusEl, '', '⏳ Caricamento rubrica clienti...');
+    try {
+      const res = await fetch('./clienti_data.json');
+      const data = await res.json();
+      db.clients = data;
+      saveDB();
+      statusEl.className = 'status-bar hidden';
+    } catch(e) {
+      showStatus(statusEl, 'error', '⚠️ Impossibile caricare la rubrica. Controlla la connessione.');
+    }
+  }
+
+  renderClientSelect();
+  renderClientManage();
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+});
+
+function renderDate() {
+  const d = new Date();
+  const opts = { weekday: 'long', day: 'numeric', month: 'long' };
+  document.getElementById('header-date').textContent =
+    d.toLocaleDateString('it-IT', opts);
+}
+
+// ─── STORAGE ─────────────────────────────────────────────────────────────────
+function loadDB() {
+  try {
+    const raw = localStorage.getItem('percorso-db');
+    if (raw) db = JSON.parse(raw);
+  } catch(e) { db = { office: null, clients: [] }; }
+}
+
+function saveDB() {
+  localStorage.setItem('percorso-db', JSON.stringify(db));
+}
+
+// ─── NAVIGATION ──────────────────────────────────────────────────────────────
+function showScreen(name, btn) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('screen-' + name).classList.add('active');
+  btn.classList.add('active');
+
+  if (name === 'oggi') renderClientSelect();
+  if (name === 'clienti') renderClientManage();
+}
+
+// ─── GEOCODIFICA ──────────────────────────────────────────────────────────────
+async function geocode(address) {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1&countrycodes=it`;
+  const res = await fetch(url, {
+    headers: { 'Accept-Language': 'it', 'User-Agent': 'PercorsoGiornaliero/1.0' }
+  });
+  const data = await res.json();
+  if (!data.length) return null;
+  return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+}
+
+// ─── HAVERSINE ────────────────────────────────────────────────────────────────
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) *
+            Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function fmtDist(km) {
+  return km < 1 ? `${Math.round(km*1000)} m` : `${km.toFixed(1)} km`;
+}
+
+// ─── TSP BRUTE FORCE ──────────────────────────────────────────────────────────
+function permute(arr) {
+  if (arr.length <= 1) return [arr.slice()];
+  const result = [];
+  for (let i = 0; i < arr.length; i++) {
+    const rest = arr.filter((_, j) => j !== i);
+    for (const p of permute(rest)) result.push([arr[i], ...p]);
+  }
+  return result;
+}
+
+function optimizeRoute(office, clients) {
+  if (clients.length === 0) return { order: [], totalDist: 0 };
+  if (clients.length === 1) {
+    const d = haversine(office.lat, office.lng, clients[0].lat, clients[0].lng);
+    return { order: clients, totalDist: d };
+  }
+
+  const perms = permute(clients);
+  let best = null, bestDist = Infinity;
+
+  for (const perm of perms) {
+    let d = haversine(office.lat, office.lng, perm[0].lat, perm[0].lng);
+    for (let i = 0; i < perm.length - 1; i++) {
+      d += haversine(perm[i].lat, perm[i].lng, perm[i+1].lat, perm[i+1].lng);
+    }
+    if (d < bestDist) { bestDist = d; best = perm; }
+  }
+  return { order: best, totalDist: bestDist };
+}
+
+// ─── SCREEN OGGI ─────────────────────────────────────────────────────────────
+function renderClientSelect() {
+  const list = document.getElementById('client-select-list');
+  const q = (document.getElementById('search-oggi')?.value || '').toLowerCase().trim();
+  const countEl = document.getElementById('search-count-oggi');
+  const summaryEl = document.getElementById('selected-summary');
+  const countText = document.getElementById('selected-count-text');
+
+  // Selected summary bar
+  if (selectedIds.size > 0) {
+    const names = db.clients.filter(c => selectedIds.has(c.id)).map(c => c.name.split(' ')[0]).join(', ');
+    countText.textContent = `${selectedIds.size} selezionati`;
+    summaryEl.style.display = 'flex';
+  } else {
+    summaryEl.style.display = 'none';
+  }
+
+  if (!db.clients.length) {
+    list.innerHTML = `<div class="empty"><div class="icon">👥</div><p>Rubrica vuota. Vai su <strong>Clienti</strong>.</p></div>`;
+    countEl.textContent = '';
+    return;
+  }
+
+  const filtered = q
+    ? db.clients.filter(c =>
+        c.name.toLowerCase().includes(q) ||
+        c.address.toLowerCase().includes(q))
+    : db.clients;
+
+  countEl.textContent = q ? `${filtered.length} risultati su ${db.clients.length}` : `${db.clients.length} clienti in rubrica`;
+
+  if (!filtered.length) {
+    list.innerHTML = `<div class="empty"><div class="icon">🔍</div><p>Nessun cliente trovato per "<strong>${esc(q)}</strong>"</p></div>`;
+    return;
+  }
+
+  // Mostra max 50 risultati per performance (i selezionati sono sempre visibili in cima)
+  const selected = filtered.filter(c => selectedIds.has(c.id));
+  const unselected = filtered.filter(c => !selectedIds.has(c.id));
+  const toShow = [...selected, ...unselected.slice(0, 50 - selected.length)];
+  const hidden = unselected.length - (50 - selected.length);
+
+  list.innerHTML = toShow.map(c => `
+    <div class="client-select-item ${selectedIds.has(c.id) ? 'selected' : ''}"
+         onclick="toggleSelect(${c.id})">
+      <div class="check">${selectedIds.has(c.id) ? '✓' : ''}</div>
+      <div class="info">
+        <div class="name">${esc(c.name)}</div>
+        <div class="addr">${esc(c.address)}</div>
+      </div>
+    </div>
+  `).join('') + (hidden > 0 ? `<p class="search-count" style="text-align:center;padding:8px">...e altri ${hidden}. Affina la ricerca.</p>` : '');
+}
+
+function clearSelection() {
+  selectedIds.clear();
+  document.getElementById('result-card').style.display = 'none';
+  renderClientSelect();
+}
+
+function toggleSelect(id) {
+  if (selectedIds.has(id)) selectedIds.delete(id);
+  else selectedIds.add(id);
+  document.getElementById('result-card').style.display = 'none';
+  renderClientSelect();
+}
+
+async function ottimizza() {
+  const statusEl = document.getElementById('status-oggi');
+  const btn = document.getElementById('btn-optimize');
+
+  if (!db.office) {
+    showStatus(statusEl, 'error', '⚠️ Imposta prima l\'indirizzo dell\'ufficio nelle Impostazioni.');
+    return;
+  }
+  if (selectedIds.size === 0) {
+    showStatus(statusEl, 'error', '⚠️ Seleziona almeno un cliente.');
+    return;
+  }
+
+  const selected = db.clients.filter(c => selectedIds.has(c.id));
+  const missing = selected.filter(c => !c.lat || !c.lng);
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Calcolo in corso...';
+  statusEl.className = 'status-bar hidden';
+
+  // Geocodifica clienti senza coordinate
+  if (missing.length > 0) {
+    showStatus(statusEl, '', `🔍 Geolocalizzazione di ${missing.length} indirizzo/i...`);
+    for (const c of missing) {
+      const coords = await geocode(c.address);
+      if (coords) {
+        c.lat = coords.lat;
+        c.lng = coords.lng;
+        const idx = db.clients.findIndex(x => x.id === c.id);
+        if (idx !== -1) { db.clients[idx].lat = coords.lat; db.clients[idx].lng = coords.lng; }
+      } else {
+        showStatus(statusEl, 'error', `❌ Indirizzo non trovato: "${c.address}". Verificalo nella rubrica.`);
+        btn.disabled = false;
+        btn.textContent = 'Calcola percorso ottimale';
+        return;
+      }
+      await new Promise(r => setTimeout(r, 1100)); // rispetta rate limit Nominatim
+    }
+    saveDB();
+  }
+
+  // Ottimizza
+  const { order, totalDist } = optimizeRoute(db.office, selected);
+
+  // Render result
+  const stepsEl = document.getElementById('result-steps');
+  let html = `
+    <div class="result-step">
+      <div class="step-num start">🏢</div>
+      <div class="step-info">
+        <div class="name">Ufficio (partenza)</div>
+        <div class="addr">${esc(db.office.address)}</div>
+      </div>
+    </div>
+  `;
+
+  let prevLat = db.office.lat, prevLng = db.office.lng;
+  order.forEach((c, i) => {
+    const d = haversine(prevLat, prevLng, c.lat, c.lng);
+    prevLat = c.lat; prevLng = c.lng;
+    html += `
+      <div class="result-step">
+        <div class="step-num">${i + 1}</div>
+        <div class="step-info">
+          <div class="name">${esc(c.name)}</div>
+          <div class="addr">${esc(c.address)}</div>
+          <div class="step-dist">↑ ${fmtDist(d)} dal punto precedente</div>
+        </div>
+      </div>
+    `;
+  });
+
+  stepsEl.innerHTML = html;
+  document.getElementById('total-dist').innerHTML =
+    `Distanza totale stimata: <strong>${fmtDist(totalDist)}</strong> (in linea d'aria)`;
+
+  // Google Maps URL
+  const mapsUrl = buildMapsUrl(db.office, order);
+  document.getElementById('btn-maps').href = mapsUrl;
+  document.getElementById('result-card').style.display = 'block';
+
+  statusEl.className = 'status-bar hidden';
+  btn.disabled = false;
+  btn.textContent = 'Calcola percorso ottimale';
+
+  // Scroll al risultato
+  setTimeout(() => document.getElementById('result-card').scrollIntoView({ behavior: 'smooth' }), 100);
+}
+
+function buildMapsUrl(office, order) {
+  const encode = s => encodeURIComponent(s);
+  // Formato: google.com/maps/dir/origine/tappa1/tappa2/...
+  const parts = [office.address, ...order.map(c => c.address)];
+  return 'https://www.google.com/maps/dir/' + parts.map(encode).join('/');
+}
+
+// ─── SCREEN CLIENTI ──────────────────────────────────────────────────────────
+function renderClientManage() {
+  const list = document.getElementById('client-manage-list');
+  const countEl = document.getElementById('search-count-clienti');
+  const q = (document.getElementById('search-clienti')?.value || '').toLowerCase().trim();
+
+  if (!db.clients.length) {
+    list.innerHTML = `<div class="empty"><div class="icon">👥</div><p>Nessun cliente salvato.</p></div>`;
+    countEl.textContent = '';
+    return;
+  }
+
+  const filtered = q
+    ? db.clients.filter(c =>
+        c.name.toLowerCase().includes(q) ||
+        c.address.toLowerCase().includes(q))
+    : db.clients;
+
+  countEl.textContent = q
+    ? `${filtered.length} risultati su ${db.clients.length}`
+    : `${db.clients.length} clienti totali`;
+
+  const toShow = filtered.slice(0, 80);
+  const hidden = filtered.length - toShow.length;
+
+  if (!filtered.length) {
+    list.innerHTML = `<div class="empty"><div class="icon">🔍</div><p>Nessun risultato per "<strong>${esc(q)}</strong>"</p></div>`;
+    return;
+  }
+
+  list.innerHTML = toShow.map(c => `
+    <div class="client-manage-item">
+      <div class="info">
+        <div class="name">${esc(c.name)}</div>
+        <div class="addr">${esc(c.address)}</div>
+        ${c.phone ? `<div class="addr">📞 ${esc(c.phone)}</div>` : ''}
+      </div>
+      <div class="actions">
+        <button class="btn btn-outline btn-sm" onclick="editClient(${c.id})">✏️</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteClient(${c.id})">🗑️</button>
+      </div>
+    </div>
+  `).join('') + (hidden > 0 ? `<p class="search-count" style="text-align:center;padding:8px">...e altri ${hidden}. Usa la ricerca per affinare.</p>` : '');
+}
+
+// ─── MODAL ───────────────────────────────────────────────────────────────────
+function openModal(id = null) {
+  editingId = id;
+  const modal = document.getElementById('modal-overlay');
+  document.getElementById('modal-title').textContent = id ? 'Modifica Cliente' : 'Nuovo Cliente';
+  document.getElementById('modal-status').className = 'status-bar hidden';
+
+  if (id) {
+    const c = db.clients.find(x => x.id === id);
+    document.getElementById('modal-name').value = c.name;
+    document.getElementById('modal-address').value = c.address;
+    document.getElementById('modal-phone').value = c.phone || '';
+    document.getElementById('modal-notes').value = c.notes || '';
+  } else {
+    document.getElementById('modal-name').value = '';
+    document.getElementById('modal-address').value = '';
+    document.getElementById('modal-phone').value = '';
+    document.getElementById('modal-notes').value = '';
+  }
+  modal.classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+  editingId = null;
+}
+
+function closeModalOutside(e) {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+}
+
+function editClient(id) { openModal(id); }
+
+async function saveClient() {
+  const name = document.getElementById('modal-name').value.trim();
+  const address = document.getElementById('modal-address').value.trim();
+  const phone = document.getElementById('modal-phone').value.trim();
+  const notes = document.getElementById('modal-notes').value.trim();
+  const statusEl = document.getElementById('modal-status');
+  const btn = document.getElementById('modal-save-btn');
+
+  if (!name) { showStatus(statusEl, 'error', '⚠️ Inserisci il nome.'); return; }
+  if (!address) { showStatus(statusEl, 'error', '⚠️ Inserisci l\'indirizzo.'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+
+  // Controlla se l'indirizzo è cambiato o è nuovo
+  const existing = editingId ? db.clients.find(x => x.id === editingId) : null;
+  let lat = existing?.lat, lng = existing?.lng;
+
+  if (!existing || existing.address !== address) {
+    showStatus(statusEl, '', '🔍 Verifica indirizzo...');
+    const coords = await geocode(address);
+    if (!coords) {
+      showStatus(statusEl, 'error', '❌ Indirizzo non trovato. Prova a essere più specifico (es. Via Roma 1, Milano).');
+      btn.disabled = false;
+      btn.textContent = 'Salva';
+      return;
+    }
+    lat = coords.lat;
+    lng = coords.lng;
+  }
+
+  if (editingId) {
+    const idx = db.clients.findIndex(x => x.id === editingId);
+    db.clients[idx] = { ...db.clients[idx], name, address, phone, notes, lat, lng };
+  } else {
+    const id = Date.now();
+    db.clients.push({ id, name, address, phone, notes, lat, lng });
+  }
+
+  saveDB();
+  renderClientManage();
+  closeModal();
+  btn.disabled = false;
+  btn.textContent = 'Salva';
+  showStatus(document.getElementById('status-clienti'), 'success', '✅ Cliente salvato.');
+  setTimeout(() => document.getElementById('status-clienti').className = 'status-bar hidden', 3000);
+}
+
+function deleteClient(id) {
+  if (!confirm('Eliminare questo cliente?')) return;
+  db.clients = db.clients.filter(c => c.id !== id);
+  selectedIds.delete(id);
+  saveDB();
+  renderClientManage();
+}
+
+// ─── IMPOSTAZIONI ─────────────────────────────────────────────────────────────
+function renderOffice() {
+  const el = document.getElementById('office-display');
+  if (db.office) {
+    el.innerHTML = `<div class="office-display">📍 ${esc(db.office.address)}</div>`;
+    document.getElementById('office-input').value = db.office.address;
+  } else {
+    el.innerHTML = '';
+  }
+}
+
+async function saveOffice() {
+  const address = document.getElementById('office-input').value.trim();
+  if (!address) { alert('Inserisci un indirizzo.'); return; }
+
+  const btn = event.target;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Verifica...';
+
+  const coords = await geocode(address);
+  if (!coords) {
+    alert('Indirizzo non trovato. Prova a essere più specifico.');
+    btn.disabled = false;
+    btn.textContent = 'Salva indirizzo ufficio';
+    return;
+  }
+
+  db.office = { address, lat: coords.lat, lng: coords.lng };
+  saveDB();
+  renderOffice();
+  btn.disabled = false;
+  btn.textContent = 'Salva indirizzo ufficio';
+  alert('✅ Ufficio salvato!');
+}
+
+// ─── UTILS ───────────────────────────────────────────────────────────────────
+function esc(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showStatus(el, type, msg) {
+  el.textContent = msg;
+  el.className = `status-bar${type ? ' ' + type : ''}`;
+}
+</script>
+
+</body>
+</html>
