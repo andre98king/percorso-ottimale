@@ -567,15 +567,50 @@ function showScreen(name, btn) {
 }
 
 // ─── GEOCODIFICA ──────────────────────────────────────────────────────────────
-async function geocode(address) {
-  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1&countrycodes=it`;
-  const res = await fetch(url, {
-    headers: { 'Accept-Language': 'it', 'User-Agent': 'PercorsoGiornaliero/1.0' }
-  });
+async function nominatimFetch(q) {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&countrycodes=it`;
+  const res = await fetch(url, { headers: { 'Accept-Language': 'it' } });
   const data = await res.json();
-  if (!data.length) return null;
-  return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+  return data.length ? { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) } : null;
 }
+
+async function geocode(address) {
+  // Pulisce l'indirizzo: rimuove provincia tra parentesi, normalizza spazi
+  const clean = address
+    .replace(/\s*\([A-Z]{2}\)\s*/g, ' ')  // rimuove (CE), (NA), ecc.
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Tentativo 1: indirizzo completo pulito
+  let result = await nominatimFetch(clean + ', Italia');
+  if (result) return result;
+  await delay(1100);
+
+  // Tentativo 2: estrae via + città (senza CAP)
+  // Formato tipico: "VIA ROMA, 1, 80100, NAPOLI"
+  const parts = clean.split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length >= 3) {
+    // Prende prima parte (via) e ultima (città), scarta CAP numerico
+    const via = parts[0];
+    const citta = parts.find((p, i) => i > 0 && !/^\d{4,5}$/.test(p)) || parts[parts.length - 1];
+    if (via && citta && via !== citta) {
+      result = await nominatimFetch(`${via}, ${citta}, Italia`);
+      if (result) return result;
+      await delay(1100);
+    }
+  }
+
+  // Tentativo 3: solo città
+  const cittaParts = parts.filter(p => !/^\d{4,5}$/.test(p));
+  if (cittaParts.length >= 2) {
+    result = await nominatimFetch(cittaParts[cittaParts.length - 1] + ', Italia');
+    if (result) return result;
+  }
+
+  return null;
+}
+
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // ─── HAVERSINE ────────────────────────────────────────────────────────────────
 function haversine(lat1, lon1, lat2, lon2) {
@@ -712,8 +747,9 @@ async function ottimizza() {
 
   // Geocodifica clienti senza coordinate
   if (missing.length > 0) {
-    showStatus(statusEl, '', `🔍 Geolocalizzazione di ${missing.length} indirizzo/i...`);
-    for (const c of missing) {
+    for (let i = 0; i < missing.length; i++) {
+      const c = missing[i];
+      showStatus(statusEl, '', `🔍 Geolocalizzazione ${i+1}/${missing.length}: ${c.name}...`);
       const coords = await geocode(c.address);
       if (coords) {
         c.lat = coords.lat;
@@ -721,12 +757,12 @@ async function ottimizza() {
         const idx = db.clients.findIndex(x => x.id === c.id);
         if (idx !== -1) { db.clients[idx].lat = coords.lat; db.clients[idx].lng = coords.lng; }
       } else {
-        showStatus(statusEl, 'error', `❌ Indirizzo non trovato: "${c.address}". Verificalo nella rubrica.`);
+        showStatus(statusEl, 'error', `❌ Indirizzo non trovato: "${c.name}" — ${c.address}. Prova a modificare l'indirizzo nella rubrica.`);
         btn.disabled = false;
         btn.textContent = 'Calcola percorso ottimale';
         return;
       }
-      await new Promise(r => setTimeout(r, 1100)); // rispetta rate limit Nominatim
+      if (i < missing.length - 1) await delay(1200);
     }
     saveDB();
   }
